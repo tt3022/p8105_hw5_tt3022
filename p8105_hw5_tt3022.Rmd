@@ -8,4 +8,103 @@ output: github_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+library
+```{r}
+library(broom)
+library(dplyr)
+library(ggplot2)
+```
+
+Problem 2
+```{r}
+set.seed(1)
+
+n <- 30
+sigma <- 5
+alpha <- 0.05
+num_simulations <- 5000
+mu_values <- c(0, 1, 2, 3, 4, 5, 6)
+
+
+results <- data.frame(mu = numeric(), estimate = numeric(), p_value = numeric(), reject_null = logical())
+
+# Simulation loop for each value of mu
+for (mu in mu_values) {
+  for (i in 1:num_simulations) {
+    # Generate random sample with current mu
+    sample_data <- rnorm(n, mean = mu, sd = sigma)
+    
+    # Perform one-sample t-test
+    test_result <- t.test(sample_data, mu = 0)
+    
+    # Extract estimate and p-value
+    tidy_result <- tidy(test_result)
+    estimate <- tidy_result$estimate
+    p_value <- tidy_result$p.value
+    reject_null <- p_value < alpha
+    
+
+    results <- rbind(results, data.frame(mu = mu, estimate = estimate, p_value = p_value, reject_null = reject_null))
+  }
+}
+
+
+power_results <- aggregate(reject_null ~ mu, data = results, mean)
+colnames(power_results) <- c("mu", "power")
+
+
+```
+
+create power plot
+```{r}
+ggplot(power_results, aes(x = mu, y = power)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Power of One-Sample t-Test vs Effect Size",
+       x = "True Mean (Effect Size)",
+       y = "Power") +
+  theme_minimal()
+```
+
+The association between effect size and power is positive and non-linear. 
+As the effect size grows, the power of the test increases rapidly at first and then plateaus near 1.
+
+```{r}
+avg_estimates_all <- aggregate(estimate ~ mu, data = results, mean)
+avg_estimates_reject <- aggregate(estimate ~ mu, data = subset(results, reject_null == TRUE), mean)
+
+ggplot() +
+  geom_line(data = avg_estimates_all, aes(x = mu, y = estimate), color = "blue", linetype = "solid", linewidth = 1) +
+  geom_point(data = avg_estimates_all, aes(x = mu, y = estimate), color = "blue") +
+  geom_line(data = avg_estimates_reject, aes(x = mu, y = estimate), color = "red", linetype = "dashed", linewidth = 1) +
+  geom_point(data = avg_estimates_reject, aes(x = mu, y = estimate), color = "red") +
+  labs(title = "Average Estimate of Mu (Blue: All Samples, Red: Rejected Null Only)",
+       x = "True Mean (Mu)",
+       y = "Average Estimate of Mu") +
+  theme_minimal()
+```
+
+The sample average of mu for tests where the null is rejected is not approximately equal to the true value of mu for smaller effect sizes.
+As mu increases, this bias decreases, and the sample average of my in rejected tests becomes more representative of the true mu.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
