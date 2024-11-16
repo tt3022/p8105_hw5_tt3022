@@ -10,49 +10,42 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 library
 ```{r}
-library(broom)
-library(dplyr)
 library(ggplot2)
+library(broom)
+library(tidyverse)
 ```
 
 Problem 2
 ```{r}
 set.seed(1)
 
-n <- 30
-sigma <- 5
-alpha <- 0.05
-num_simulations <- 5000
-mu_values <- c(0, 1, 2, 3, 4, 5, 6)
+n <- 30            
+sigma <- 5          
+mu_values <- 0:6    
+iterations <- 5000  
+alpha <- 0.05      
 
-
-results <- data.frame(mu = numeric(), estimate = numeric(), p_value = numeric(), reject_null = logical())
-
-# Simulation loop for each value of mu
-for (mu in mu_values) {
-  for (i in 1:num_simulations) {
-    # Generate random sample with current mu
-    sample_data <- rnorm(n, mean = mu, sd = sigma)
-    
-    # Perform one-sample t-test
-    test_result <- t.test(sample_data, mu = 0)
-    
-    # Extract estimate and p-value
-    tidy_result <- tidy(test_result)
-    estimate <- tidy_result$estimate
-    p_value <- tidy_result$p.value
-    reject_null <- p_value < alpha
-    
-
-    results <- rbind(results, data.frame(mu = mu, estimate = estimate, p_value = p_value, reject_null = reject_null))
-  }
+perform_t_test <- function(mu) {
+  data <- rnorm(n, mean = mu, sd = sigma)
+  test_result <- t.test(data, mu = 0)
+  tidy(test_result) %>% 
+    select(estimate = estimate, p.value)
 }
 
 
-power_results <- aggregate(reject_null ~ mu, data = results, mean)
-colnames(power_results) <- c("mu", "power")
+sim_results <- expand_grid(
+  mu = mu_values,
+  iter = 1:iterations
+) %>%
+  mutate(
+    test_results = map(mu, perform_t_test)
+  ) %>%
+  unnest(test_results)
 
 
+power_results <- sim_results %>%
+  group_by(mu) %>%
+  summarize(power = mean(p.value < alpha))
 ```
 
 create power plot
@@ -60,27 +53,37 @@ create power plot
 ggplot(power_results, aes(x = mu, y = power)) +
   geom_line() +
   geom_point() +
-  labs(title = "Power of One-Sample t-Test vs Effect Size",
-       x = "True Mean (Effect Size)",
-       y = "Power") +
+  labs(
+    title = "Power vs Effect Size",
+    x = "True Mean (μ)",
+    y = "Power"
+  ) +
   theme_minimal()
 ```
 
 The association between effect size and power is positive and non-linear. 
 As the effect size grows, the power of the test increases rapidly at first and then plateaus near 1.
 
-```{r}
-avg_estimates_all <- aggregate(estimate ~ mu, data = results, mean)
-avg_estimates_reject <- aggregate(estimate ~ mu, data = subset(results, reject_null == TRUE), mean)
+```{r warning=FALSE}
+average_estimates <- sim_results %>%
+  group_by(mu) %>%
+  summarize(
+    mean_estimate = mean(estimate),
+    mean_estimate_rejected = mean(estimate[p.value < alpha])
+  )
 
-ggplot() +
-  geom_line(data = avg_estimates_all, aes(x = mu, y = estimate), color = "blue", linetype = "solid", linewidth = 1) +
-  geom_point(data = avg_estimates_all, aes(x = mu, y = estimate), color = "blue") +
-  geom_line(data = avg_estimates_reject, aes(x = mu, y = estimate), color = "red", linetype = "dashed", linewidth = 1) +
-  geom_point(data = avg_estimates_reject, aes(x = mu, y = estimate), color = "red") +
-  labs(title = "Average Estimate of Mu (Blue: All Samples, Red: Rejected Null Only)",
-       x = "True Mean (Mu)",
-       y = "Average Estimate of Mu") +
+ggplot(average_estimates, aes(x = mu)) +
+  geom_line(aes(y = mean_estimate), color = "blue") +
+  geom_line(aes(y = mean_estimate_rejected), color = "red") +
+  labs(
+    title = "Average Estimate of µ vs True Mean",
+    x = "True Mean (μ)",
+    y = "Average Estimate of μ",
+    color = "Estimate Type"
+  ) +
+  scale_color_manual(
+    values = c("blue" = "All Samples", "red" = "Rejected Samples")
+  ) +
   theme_minimal()
 ```
 
@@ -88,21 +91,79 @@ The sample average of mu for tests where the null is rejected is not approximate
 As mu increases, this bias decreases, and the sample average of my in rejected tests becomes more representative of the true mu.
 
 
+Problem 3:
+
+```{r message=FALSE, warning=FALSE}
+homicide_data <- read_csv("data/homicide-data.csv")
+summary(homicide_data)
+homicide_data <- homicide_data %>%
+  mutate(city_state = paste(city, state, sep = ", "))
+
+# Define unsolved homicides
+unsolved_dispositions <- c("Closed without arrest", "Open/No arrest")
+
+# Summarize data within cities
+city_summary <- homicide_data %>%
+  group_by(city_state) %>%
+  summarize(
+    total_homicides = n(),
+    unsolved_homicides = sum(disposition %in% unsolved_dispositions)
+  ) %>%
+  arrange(desc(total_homicides))
+write_csv(city_summary, "city_homicide_summary.csv")
+```
+There is 52,179 rows and 12 columns including identifiers, victim information, location, and disposition.
+
+```{r}
+baltimore_data <- homicide_data %>%
+  filter(city_state == "Baltimore, MD")
+
+# Total homicides and unsolved homicides in Baltimore, MD
+total_homicides <- nrow(baltimore_data)
+unsolved_homicides <- sum(baltimore_data$disposition %in% unsolved_dispositions)
+
+prop_test_result <- prop.test(
+  x = unsolved_homicides,  # Number of unsolved homicides
+  n = total_homicides      # Total homicides
+)
+prop_test_summary <- tidy(prop_test_result)
+print(prop_test_summary)
+
+```
+Estimated Proportion of Unsolved Homicides: 0.646
+95% Confidence Interval: [0.628, 0.663]
 
 
+```{r warning=FALSE}
+unsolved_dispositions <- c("Closed without arrest", "Open/No arrest")
 
-
-
-
-
-
-
-
-
-
-
-
-
+city_prop_test_results <- homicide_data %>%
+  mutate(city_state = paste(city, state, sep = ", ")) %>%
+  group_by(city_state) %>%
+  summarize(
+    total_homicides = n(),
+    unsolved_homicides = sum(disposition %in% unsolved_dispositions)
+  ) %>%
+  mutate(
+    prop_test = map2(unsolved_homicides, total_homicides, ~ prop.test(.x, .y)),
+    tidy_results = map(prop_test, broom::tidy)
+  ) %>%
+  unnest(tidy_results) %>%
+  select(city_state, estimate, conf.low, conf.high)
+```
+To create a plot:
+```{r}
+ggplot(city_prop_test_results, aes(x = reorder(city_state, estimate), y = estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  coord_flip() +
+  labs(
+    title = "Proportion of Unsolved Homicides by City",
+    x = "City",
+    y = "Estimated Proportion of Unsolved Homicides"
+  ) +
+  theme_minimal()
+```
 
 
 
